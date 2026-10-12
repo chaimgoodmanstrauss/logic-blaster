@@ -75,10 +75,10 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
     <div class="ov" id="ovTitle">
       <div class="card">
         <h1>LOGIC<br>BLASTER</h1>
-        <p>Expressions rain down. Target one and blast it with its truth value. Guess wrong and it <span style="color:var(--mag)">splits in two</span>: a copy plus a mutant. Level 1 is just T and F. Each new level changes the form: <b>not</b>, <b>and</b>, then <b>and/or</b> with three leaves, mixes with <b>not</b>, <b>if</b>, and finally variables, while everything falls faster.</p>
+        <p>Expressions rain down. Target one and blast it with its truth value. Guess wrong and it <span style="color:var(--mag)">splits in two</span>: a copy plus a mutant. Level 1 is just T and F. Each level adds one step: an operator, a leaf, a variable, or a bit more speed. A level ends when everything is blasted or landed.</p>
         <div class="opts">
-          <label for="oVars">MAX VARIABLES<select id="oVars"><option value="0">0 — constants only</option><option value="1">1 (P)</option><option value="2" selected>2 (P, Q)</option><option value="3">3 (P, Q, R)</option><option value="4">4 (P–S)</option></select></label>
-          <label for="oLeaves">MAX SIZE (LEAVES)<select id="oLeaves"><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>8</option></select></label>
+          <label for="oVars">MAX VARIABLES<select id="oVars"><option value="0">0 — constants only</option><option value="1">1 (P)</option><option value="2">2 (P, Q)</option><option value="3">3 (P, Q, R)</option><option value="4" selected>4 (P–S)</option></select></label>
+          <label for="oLeaves">MAX SIZE (LEAVES)<select id="oLeaves"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option selected>8</option></select></label>
           <label for="oSpeed">FALL SPEED<select id="oSpeed"><option value="0.6">Slow</option><option value="1" selected>Normal</option><option value="1.5">Fast</option></select></label>
           <label for="oNote">NOTATION<select id="oNote"><option value="sym">¬ ∧ ∨ →</option><option value="words">not and or if…then</option></select></label>
           <label>BLAST TRUE WITH<button class="keyb" id="kT" type="button"></button></label>
@@ -119,29 +119,44 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
   Freeze: S.frozen stops falling, spawning and the music heartbeat only;
           particles/answers keep working.
   Audio:  WebAudio square/triangle/noise synth: tone(), noise(), sfx.* (effects only: fire, hit, bad, split, land, start, over).
-  Levels: tier(L) = {ops, n(leaves), v} difficulty ladder (T/F, not, and, and/or x3 leaves, not+and, mix x4, if, all, variables, bigger); cfg are caps.
+  Levels: RAMP (built once) = one notch per level across operators, leaves, variables, speed. waveSize(L)=4+L expressions per level.
   Keys:   S.keys {T,F} rebindable on title screen, saved in localStorage.
 ========================================================================== */
 const VARS=['P','Q','R','S'];
 const $=id=>document.getElementById(id);
 const cv=$('cv'), ctx=cv.getContext('2d');
 const S={state:'title',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,
-  hitsLvl:0,hits:0,miss:0,frozen:false,target:null,env:{},spawnT:0,pause:0,streak:0,
-  shake:0,flash:0,banner:null,cfg:{vars:2,leaves:6,speed:1,words:false},nid:1,tier:{ops:[],d:0,v:0}};
+  hits:0,miss:0,toSpawn:0,clearing:false,frozen:false,target:null,env:{},spawnT:0,pause:0,streak:0,
+  shake:0,flash:0,banner:null,cfg:{vars:4,leaves:8,speed:1,words:false},nid:1,tier:{ops:[],d:0,v:0}};
 let W=0,H=0,DPR=1,fs=18,mgen=0;
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 let hi=0; try{hi=+localStorage.getItem('lb_hi')||0}catch(e){}
 
 /* ---------- logic ---------- */
 const rnd=n=>Math.floor(Math.random()*n), pick=a=>a[rnd(a.length)];
-const ALL=['not','and','or','if'];
-const NEW=['JUST T AND F','NEW: NOT','NEW: AND','AND / OR · 3 LEAVES','NOT + AND · 3 LEAVES','NOT AND OR · 4 LEAVES','NEW: IF … THEN','ALL FOUR · 3 LEAVES','ALL FOUR · 4 LEAVES','NEW: VARIABLES','MORE VARIABLES · 5 LEAVES'];
-function tier(L){ // difficulty ladder: each early level is its own form (operator set x number of leaves). Settings are caps.
-  const T=[{ops:[],n:1,v:0},{ops:['not'],n:1,v:0},{ops:['and'],n:2,v:0},{ops:['and','or'],n:3,v:0},
-    {ops:['not','and'],n:3,v:0},{ops:['not','and','or'],n:4,v:0},{ops:['if'],n:2,v:0},
-    {ops:ALL,n:3,v:0},{ops:ALL,n:4,v:0},{ops:ALL,n:4,v:1},{ops:ALL,n:5,v:2}];
-  const t=L<=11?T[L-1]:{ops:ALL,n:5+Math.floor((L-10)/2),v:Math.min(4,2+Math.floor((L-11)/2))};
-  return {ops:t.ops,n:Math.min(t.n,S.cfg.leaves),v:Math.min(t.v,S.cfg.vars)};
+const OPS=['not','and','or','if'], OP_LABEL={not:'NEW: NOT',and:'NEW: AND',or:'NEW: OR',if:'NEW: IF … THEN'};
+// Difficulty ramp, built once: one notch per level, interleaved across four tracks (operators, leaves, variables, speed).
+// RAMP[i] is the state for level i+1. Once it runs out, levels keep growing only through wave size.
+const RAMP=(()=>{
+  const st={ops:[],n:1,v:0,speed:1}, done={op:0,leaf:0,var:0,speed:0}, total={op:OPS.length,leaf:6,var:4,speed:20};
+  const out=[{...st,ops:[],label:'JUST T AND F'}];
+  for(;;){
+    const open=Object.keys(total).filter(k=>done[k]<total[k]);
+    if(!open.length)break;
+    const k=open.reduce((a,b)=>done[b]/total[b]<done[a]/total[a]?b:a); // least-progressed track takes the next notch
+    let label;
+    if(k==='op'){const o=OPS[done.op++];st.ops=OPS.slice(0,done.op);label=OP_LABEL[o];}
+    else if(k==='leaf'){done.leaf++;st.n++;label=st.n+' LEAVES';}
+    else if(k==='var'){done.var++;st.v++;label='NEW VARIABLE: '+VARS[st.v-1];}
+    else{done.speed++;st.speed=+(1+.05*done.speed).toFixed(2);label='FASTER';}
+    out.push({...st,ops:[...st.ops],label});
+  }
+  return out;
+})();
+const waveSize=L=>4+L; // expressions per level; the level ends when they are all blasted or landed
+function tier(L){ // ramp state for level L; the panel options are caps on top of it
+  const s=RAMP[Math.min(L-1,RAMP.length-1)];
+  return {ops:s.ops,n:Math.min(s.n,S.cfg.leaves),v:Math.min(s.v,S.cfg.vars),speed:s.speed,label:L<=RAMP.length?s.label:'BIGGER WAVE'};
 }
 function leaf(){ const nv=S.tier.v; if(nv>0&&Math.random()<.65) return {t:'v',n:VARS[rnd(nv)]}; return {t:'c',v:Math.random()<.5}; }
 function gen(n){ // n = number of leaves
@@ -224,15 +239,16 @@ function readCfg(){S.cfg={vars:+$('oVars').value,leaves:+$('oLeaves').value,spee
   words:$('oNote').value==='words'};S.tier=tier(S.level||1);}
 function startGame(){
   audioInit();readCfg();
-  Object.assign(S,{state:'play',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,hitsLvl:0,hits:0,miss:0,
+  Object.assign(S,{state:'play',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,toSpawn:waveSize(1),clearing:false,
+    hits:0,miss:0,
     frozen:false,target:null,spawnT:.6,pause:1.2,streak:0,banner:null});
   S.tier=tier(1);newEnv();banner();
   $('ovTitle').hidden=true;$('ovOver').hidden=true;$('bZ').classList.remove('on');setFreezeLabel();
   sfx.start();hud();
 }
 function envText(){return S.tier.v?VARS.slice(0,S.tier.v).map(v=>`${v}=${S.env[v]?'T':'F'}`).join('  '):'';}
-function banner(){S.banner={t:'LEVEL '+S.level,s:S.level<=11?NEW[S.level-1]:'BIGGER · FASTER',s2:envText(),life:2.6};}
-function fallTime(){return Math.max(5,17-(S.level-1)*1)/S.cfg.speed;}
+function banner(){S.banner={t:'LEVEL '+S.level,s:S.tier.label,s2:envText(),life:2.6};}
+function fallTime(){return 17/(S.tier.speed*S.cfg.speed);}
 function maxOn(){return Math.min(9,3+Math.ceil(S.level/2));}
 function spawn(node,xf,yf){
   node=node||gen(S.tier.n);
@@ -245,7 +261,7 @@ function spawn(node,xf,yf){
   S.exprs.push(e);return e;
 }
 function levelUp(){
-  S.level++;S.hitsLvl=0;S.tier=tier(S.level);
+  S.level++;S.toSpawn=waveSize(S.level);S.clearing=false;S.tier=tier(S.level);
   for(const e of S.exprs)burst(e,'#7a83b8',8,.6);
   S.exprs=[];S.target=null;newEnv();S.pause=2.6;S.spawnT=.4;
   banner();hud();
@@ -271,12 +287,11 @@ function answer(val){
   const correct=ev(e.node,S.env)===val;
   S.beams.push({x:boxX(e),y:boxY(e)+e.h/2,c:val?'#43f3ff':'#ff47d6',life:.18});sfx.fire();
   if(correct){
-    S.streak++;S.hits++;S.hitsLvl++;
+    S.streak++;S.hits++;
     const pts=10*e.size*S.level+5*Math.min(S.streak,20);S.score+=pts;
     burst(e,e.col,26,1);sfx.hit();
     S.floats.push({x:boxX(e),y:boxY(e),t:'+'+pts,c:'#ffe445',life:1});
     S.exprs.splice(S.exprs.indexOf(e),1);S.target=null;
-    if(S.hitsLvl>=Math.min(14,5+S.level))setTimeout(()=>{if(S.state==='play')levelUp()},350);
   }else{
     S.streak=0;S.miss++;S.score=Math.max(0,S.score-25);
     const off=Math.min(.22,(e.w/W)*.55+.04);
@@ -326,8 +341,9 @@ function update(dt){
   if(S.state!=='play'||S.frozen)return;
   if(S.pause>0){S.pause-=dt;return;}
   S.spawnT-=dt;
-  const iv=Math.max(1.1,4.2-S.level*.25)/S.cfg.speed;
-  if((S.spawnT<=0&&S.exprs.length<maxOn())||!S.exprs.length&&S.spawnT>.5){spawn();S.spawnT=iv;}
+  const iv=4.2/(S.tier.speed*S.cfg.speed);
+  if(S.toSpawn>0&&((S.spawnT<=0&&S.exprs.length<maxOn())||!S.exprs.length&&S.spawnT>.5)){spawn();S.toSpawn--;S.spawnT=iv;}
+  if(!S.toSpawn&&!S.exprs.length&&!S.clearing){S.clearing=true;setTimeout(()=>{if(S.state==='play')levelUp()},600);}
   const vy=1/fallTime();
   for(const e of [...S.exprs]){
     measure(e);
