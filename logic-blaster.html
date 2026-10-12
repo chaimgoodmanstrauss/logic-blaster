@@ -217,7 +217,9 @@ function parseSpec(text){
     const where=line.match(/^where\s+(.+?)\s*=\s*(.+)$/i);
     if(where){
       if(!levels.length)throw new Error(`"${line}": where must follow a level line`);
-      const dom=where[2].split(',').map(x=>x.trim()).filter(Boolean).map(x=>ev(bind(parseForm(x),{})));
+      const dom=where[2].split(',').map(x=>x.trim()).filter(Boolean).map(x=>{const t=parseForm(x);
+        if(varsOf(t).size)throw new Error(`"${x}" on the where line must be a constant (T, F, ~T ...), not a form with letters`);
+        return ev(bind(t,{}));});
       for(const v of where[1].split(/[\s,]+/).filter(Boolean))levels.at(-1).dom[v.toUpperCase()]=dom;
       return;
     }
@@ -560,9 +562,11 @@ addEventListener('keydown',ev_=>{
   if(binding){ev_.preventDefault();
     if(k==='escape'){binding=null;renderKeys();return}
     if(ev_.key.length===1&&k!==' ')bindKey(binding,k);return;}
+  if(k==='`'){ev_.preventDefault();saveState();return;} // secret: save state
   if(S.state!=='play'){
     if(k==='enter'&&(!$('ovTitle').hidden||!$('ovOver').hidden)&&!document.activeElement.closest('.opts')&&document.activeElement.id!=='oName'){ev_.preventDefault();startGame();}
     return;}
+  if(k===']'){ev_.preventDefault();if(S.level>=LAST_N)gameOver(true);else levelUp();return;} // secret: skip to next level
   if(k===S.keys.T){if(!ev_.repeat)answer(true);}
   else if(k===S.keys.F){if(!ev_.repeat)answer(false);}
   else if(k===' '||k==='escape'){ev_.preventDefault();toggleFreeze();}
