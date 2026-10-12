@@ -20,9 +20,6 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidde
 #hud{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-family:var(--disp);font-size:11px;letter-spacing:.06em}
 #hud .k{color:var(--dim);margin-right:6px}
 #hud .score{color:var(--yel)} #hud .lvl{color:var(--cyan)} #hud .lives{color:var(--org);letter-spacing:.2em}
-#vars{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
-.chip{font-family:var(--mono);font-size:14px;padding:3px 8px;border:1px solid var(--line);background:var(--panel)}
-.chip b{color:var(--cyan)} .chip i{font-style:normal;color:var(--yel)}
 #stage{position:relative;flex:1;min-height:0;background:var(--crt);border:2px solid var(--line);overflow:hidden}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:manipulation}
 #stage::after{content:"";position:absolute;inset:0;pointer-events:none;
@@ -59,7 +56,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidde
 .sm button.on{color:var(--grn)!important;border-color:var(--grn)!important}
 #deck button:active{filter:brightness(1.4)}
 button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-offset:2px}
-@media (max-width:520px){#hud{font-size:9px}.chip{font-size:12px}#vars{margin-left:0}}
+@media (max-width:520px){#hud{font-size:9px}}
 </style>
 
 <div id="app">
@@ -68,16 +65,17 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
     <div><span class="k">LEVEL</span><span class="lvl" id="hLvl">1</span></div>
     <div><span class="k">BASES</span><span class="lives" id="hLives">▲▲▲</span></div>
     <div><span class="k">HI</span><span id="hHi">0</span></div>
-    <div id="vars"></div>
   </div>
   <div id="stage">
     <canvas id="cv"></canvas>
     <div class="ov" id="ovTitle">
       <div class="card">
         <h1>LOGIC<br>BLASTER</h1>
-        <p>Expressions rain down. Target one and blast it with its truth value. Guess wrong and it <span style="color:var(--mag)">splits in two</span>: a copy plus a mutant. Level 1 is just T and F. Each level adds one step: an operator, a leaf, a variable, or a bit more speed. A level ends when everything is blasted or landed.</p>
+        <p>Blast each falling expression with its truth value. Wrong guesses split it.</p>
+<div><button class="big" id="bStart">INSERT COIN ▸ START</button></div>
+        <div><button class="big" id="bSettings" style="background:var(--cyan)">SETTINGS</button></div>
+        <div id="settings" hidden>
         <div class="opts">
-          <label for="oVars">MAX VARIABLES<select id="oVars"><option value="0">0 — constants only</option><option value="1">1 (P)</option><option value="2">2 (P, Q)</option><option value="3">3 (P, Q, R)</option><option value="4" selected>4 (P–S)</option></select></label>
           <label for="oLeaves">MAX SIZE (LEAVES)<select id="oLeaves"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option selected>8</option></select></label>
           <label for="oSpeed">FALL SPEED<select id="oSpeed"><option value="0.6">Slow</option><option value="1" selected>Normal</option><option value="1.5">Fast</option></select></label>
           <label for="oNote">NOTATION<select id="oNote"><option value="sym">¬ ∧ ∨ →</option><option value="words">not and or if…then</option></select></label>
@@ -85,7 +83,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
           <label>BLAST FALSE WITH<button class="keyb" id="kF" type="button"></button></label>
         </div>
         <p id="help"></p>
-<div><button class="big" id="bStart">INSERT COIN ▸ START</button></div>
+        </div>
       </div>
     </div>
     <div class="ov" id="ovOver" hidden>
@@ -103,31 +101,30 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
     <button id="bT" aria-label="Blast true"></button>
     <button id="bZ">FREEZE</button>
     <button id="bF" aria-label="Blast false"></button>
-    <div class="sm"><button id="bSfx" class="on">SOUND</button></div>
+    <div class="sm"><button id="bSfx" class="on">SOUND</button><button id="bSave">SAVE</button></div>
   </div>
 </div>
 
 <script>
 /* ===== STRUCTURE (for future edits) =====================================
-  Logic:  gen(depth) -> tree {t:'c'|'v'|'not'|'and'|'or'|'if', v|n|a|b}
-          ev(tree, env) evaluates; str(tree) renders; variation(tree) mutates one node.
+  Logic:  gen(depth) -> tree {t:'c'|'not'|'and'|'or'|'if', v|a|b}
+          ev(tree) evaluates; str(tree) renders; variation(tree) mutates one node.
   State:  S (single object). S.exprs = falling items {node,txt,xf,yf,vx,size,id}
           xf/yf are fractions of field width / ground height (resize-safe).
   Flow:   startGame -> loop(update, draw). answer(bool) resolves the target:
           correct -> explode + score; wrong -> split (copy + variation).
-          levelUp clears the wave and reassigns variable values (S.env).
+          levelUp clears the wave and starts the next one.
   Freeze: S.frozen stops falling, spawning and the music heartbeat only;
           particles/answers keep working.
   Audio:  WebAudio square/triangle/noise synth: tone(), noise(), sfx.* (effects only: fire, hit, bad, split, land, start, over).
-  Levels: RAMP (built once) = one notch per level across operators, leaves, variables, speed. waveSize(L)=4+L expressions per level.
+  Levels: RAMP (built once) = one notch per level across operators, leaves, speed. waveSize(L)=4+L expressions per level.
   Keys:   S.keys {T,F} rebindable on title screen, saved in localStorage.
 ========================================================================== */
-const VARS=['P','Q','R','S'];
 const $=id=>document.getElementById(id);
 const cv=$('cv'), ctx=cv.getContext('2d');
 const S={state:'title',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,
-  hits:0,miss:0,toSpawn:0,clearing:false,frozen:false,target:null,env:{},spawnT:0,pause:0,streak:0,
-  shake:0,flash:0,banner:null,cfg:{vars:4,leaves:8,speed:1,words:false},nid:1,tier:{ops:[],d:0,v:0}};
+  hits:0,miss:0,toSpawn:0,clearing:false,frozen:false,target:null,spawnT:0,pause:0,streak:0,
+  shake:0,flash:0,banner:null,cfg:{leaves:8,speed:1,words:false},nid:1,tier:{ops:[],d:0}};
 let W=0,H=0,DPR=1,fs=18,mgen=0;
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 let hi=0; try{hi=+localStorage.getItem('lb_hi')||0}catch(e){}
@@ -135,10 +132,10 @@ let hi=0; try{hi=+localStorage.getItem('lb_hi')||0}catch(e){}
 /* ---------- logic ---------- */
 const rnd=n=>Math.floor(Math.random()*n), pick=a=>a[rnd(a.length)];
 const OPS=['not','and','or','if'], OP_LABEL={not:'NEW: NOT',and:'NEW: AND',or:'NEW: OR',if:'NEW: IF … THEN'};
-// Difficulty ramp, built once: one notch per level, interleaved across four tracks (operators, leaves, variables, speed).
+// Difficulty ramp, built once: one notch per level, interleaved across four tracks (operators, leaves, speed).
 // RAMP[i] is the state for level i+1. Once it runs out, levels keep growing only through wave size.
 const RAMP=(()=>{
-  const st={ops:[],n:1,v:0,speed:1}, done={op:0,leaf:0,var:0,speed:0}, total={op:OPS.length,leaf:6,var:4,speed:20};
+  const st={ops:[],n:1,speed:1}, done={op:0,leaf:0,speed:0}, total={op:OPS.length,leaf:6,speed:10};
   const out=[{...st,ops:[],label:'JUST T AND F'}];
   for(;;){
     const open=Object.keys(total).filter(k=>done[k]<total[k]);
@@ -147,18 +144,19 @@ const RAMP=(()=>{
     let label;
     if(k==='op'){const o=OPS[done.op++];st.ops=OPS.slice(0,done.op);label=OP_LABEL[o];}
     else if(k==='leaf'){done.leaf++;st.n++;label=st.n+' LEAVES';}
-    else if(k==='var'){done.var++;st.v++;label='NEW VARIABLE: '+VARS[st.v-1];}
     else{done.speed++;st.speed=+(1+.05*done.speed).toFixed(2);label='FASTER';}
     out.push({...st,ops:[...st.ops],label});
   }
   return out;
 })();
-const waveSize=L=>4+L; // expressions per level; the level ends when they are all blasted or landed
+const HOLD=2; // levels per notch
+const SPLIT_RADIUS=.25, SPLIT_SPEED=.02; // copies drift apart to this distance at this rate (per second, fraction of field width)
+const waveSize=L=>4+Math.floor(L/2); // expressions per level; the level ends when they are all blasted or landed
 function tier(L){ // ramp state for level L; the panel options are caps on top of it
-  const s=RAMP[Math.min(L-1,RAMP.length-1)];
-  return {ops:s.ops,n:Math.min(s.n,S.cfg.leaves),v:Math.min(s.v,S.cfg.vars),speed:s.speed,label:L<=RAMP.length?s.label:'BIGGER WAVE'};
+  const i=Math.floor((L-1)/HOLD), s=RAMP[Math.min(i,RAMP.length-1)];
+  return {ops:s.ops,n:Math.min(s.n,S.cfg.leaves),speed:s.speed,label:i<RAMP.length?s.label:'BIGGER WAVE'};
 }
-function leaf(){ const nv=S.tier.v; if(nv>0&&Math.random()<.65) return {t:'v',n:VARS[rnd(nv)]}; return {t:'c',v:Math.random()<.5}; }
+function leaf(){return {t:'c',v:Math.random()<.5};}
 function gen(n){ // n = number of leaves
   const ops=S.tier.ops,bin=ops.filter(o=>o!=='not'),hasNot=ops.includes('not');
   let node;
@@ -170,10 +168,10 @@ function gen(n){ // n = number of leaves
   }
   return node;
 }
-function ev(n,e){switch(n.t){case'c':return n.v;case'v':return e[n.n];case'not':return!ev(n.a,e);
-  case'and':return ev(n.a,e)&&ev(n.b,e);case'or':return ev(n.a,e)||ev(n.b,e);case'if':return!ev(n.a,e)||ev(n.b,e);}}
+function ev(n){switch(n.t){case'c':return n.v;case'not':return!ev(n.a);
+  case'and':return ev(n.a)&&ev(n.b);case'or':return ev(n.a)||ev(n.b);case'if':return!ev(n.a)||ev(n.b);}}
 function str(n,top){const Wd=S.cfg.words;
-  switch(n.t){case'c':return n.v?'T':'F';case'v':return n.n;
+  switch(n.t){case'c':return n.v?'T':'F';
   case'not':return (Wd?'not ':'¬')+str(n.a,false);
   default:{const a=str(n.a,false),b=str(n.b,false);
     const s=n.t==='if'?(Wd?`if ${a} then ${b}`:`${a} → ${b}`):`${a} ${Wd?n.t:(n.t==='and'?'∧':'∨')} ${b}`;
@@ -183,11 +181,9 @@ const clone=n=>JSON.parse(JSON.stringify(n));
 function nodes(n,acc=[],par=null,key=null){acc.push({n,par,key});if(n.a)nodes(n.a,acc,n,'a');if(n.b)nodes(n.b,acc,n,'b');return acc;}
 function mutateOnce(root){
   const r=clone(root),{n,par,key}=pick(nodes(r)); let rep;
-  const ops=S.tier.ops,hasNot=ops.includes('not'),vs=VARS.slice(0,S.tier.v);
+  const ops=S.tier.ops,hasNot=ops.includes('not');
   const wrap=x=>hasNot?{t:'not',a:x}:{t:'c',v:Math.random()<.5};
-  if(n.t==='c') rep=(vs.length&&Math.random()<.4)?{t:'v',n:pick(vs)}:{t:'c',v:!n.v};
-  else if(n.t==='v'){const q=Math.random();
-    rep=q<.45&&vs.length>1?{t:'v',n:pick(vs.filter(x=>x!==n.n))}:q<.75?wrap(n):{t:'c',v:Math.random()<.5};}
+  if(n.t==='c') rep={t:'c',v:!n.v};
   else if(n.t==='not') rep=n.a;
   else{const q=Math.random(),alt=ops.filter(x=>x!==n.t&&x!=='not');
     if(q<.6&&alt.length) rep={t:pick(alt),a:n.a,b:n.b};
@@ -197,8 +193,7 @@ function mutateOnce(root){
 }
 function variation(root){const s=str(root,true);
   for(let i=0;i<15;i++){const m=mutateOnce(root);if(str(m,true)!==s)return m;}
-  return S.tier.ops.includes('not')?{t:'not',a:clone(root)}:{t:'c',v:!ev(root,S.env)};}
-function newEnv(){S.env={};VARS.slice(0,S.tier.v).forEach(v=>S.env[v]=Math.random()<.5);}
+  return S.tier.ops.includes('not')?{t:'not',a:clone(root)}:{t:'c',v:!ev(root)};}
 
 /* ---------- audio (effects only, no music) ---------- */
 let AC=null,master,sfxG,noiseBuf,sfxOn=true;
@@ -235,21 +230,20 @@ const sfx={
 };
 
 /* ---------- game flow ---------- */
-function readCfg(){S.cfg={vars:+$('oVars').value,leaves:+$('oLeaves').value,speed:+$('oSpeed').value,
+function readCfg(){S.cfg={leaves:+$('oLeaves').value,speed:+$('oSpeed').value,
   words:$('oNote').value==='words'};S.tier=tier(S.level||1);}
 function startGame(){
   audioInit();readCfg();
   Object.assign(S,{state:'play',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,toSpawn:waveSize(1),clearing:false,
     hits:0,miss:0,
     frozen:false,target:null,spawnT:.6,pause:1.2,streak:0,banner:null});
-  S.tier=tier(1);newEnv();banner();
+  S.tier=tier(1);banner();
   $('ovTitle').hidden=true;$('ovOver').hidden=true;$('bZ').classList.remove('on');setFreezeLabel();
   sfx.start();hud();
 }
-function envText(){return S.tier.v?VARS.slice(0,S.tier.v).map(v=>`${v}=${S.env[v]?'T':'F'}`).join('  '):'';}
-function banner(){S.banner={t:'LEVEL '+S.level,s:S.tier.label,s2:envText(),life:2.6};}
+function banner(){S.banner={t:'LEVEL '+S.level,s:S.tier.label,life:2.6};}
 function fallTime(){return 17/(S.tier.speed*S.cfg.speed);}
-function maxOn(){return Math.min(9,3+Math.ceil(S.level/2));}
+function maxOn(){return Math.min(7,3+Math.floor(S.level/3));}
 function spawn(node,xf,yf){
   node=node||gen(S.tier.n);
   const e={node,txt:str(node,true),size:size(node),xf:xf??.5,yf:yf??-.02,vx:0,id:S.nid++,mk:-1,w:0,h:0,fs:0};
@@ -263,7 +257,7 @@ function spawn(node,xf,yf){
 function levelUp(){
   S.level++;S.toSpawn=waveSize(S.level);S.clearing=false;S.tier=tier(S.level);
   for(const e of S.exprs)burst(e,'#7a83b8',8,.6);
-  S.exprs=[];S.target=null;newEnv();S.pause=2.6;S.spawnT=.4;
+  S.exprs=[];S.target=null;S.pause=2.6;S.spawnT=.4;
   banner();hud();
 }
 function gameOver(){
@@ -275,7 +269,6 @@ function gameOver(){
 function hud(){
   $('hScore').textContent=S.score;$('hLvl').textContent=S.level;
   $('hLives').textContent='▲'.repeat(Math.max(0,S.lives))||'—';$('hHi').textContent=Math.max(hi,S.score);
-  $('vars').innerHTML=S.tier.v?VARS.slice(0,S.tier.v).map(v=>`<span class="chip"><b>${v}</b> = <i>${S.env[v]==null?'?':S.env[v]?'T':'F'}</i></span>`).join(''):'<span class="chip">T / F only</span>';
 }
 function sorted(){return [...S.exprs].sort((a,b)=>b.yf-a.yf);}
 function validTarget(){if(!S.exprs.includes(S.target))S.target=sorted()[0]||null;return S.target;}
@@ -284,7 +277,7 @@ function cycle(d){const L=[...S.exprs].sort((a,b)=>a.xf-b.xf);if(!L.length)retur
 
 function answer(val){
   if(S.state!=='play')return;const e=validTarget();if(!e)return;
-  const correct=ev(e.node,S.env)===val;
+  const correct=ev(e.node)===val;
   S.beams.push({x:boxX(e),y:boxY(e)+e.h/2,c:val?'#43f3ff':'#ff47d6',life:.18});sfx.fire();
   if(correct){
     S.streak++;S.hits++;
@@ -294,11 +287,12 @@ function answer(val){
     S.exprs.splice(S.exprs.indexOf(e),1);S.target=null;
   }else{
     S.streak=0;S.miss++;S.score=Math.max(0,S.score-25);
-    const off=Math.min(.22,(e.w/W)*.55+.04);
     const yf=Math.max(-.02,e.yf-.04);
     S.exprs.splice(S.exprs.indexOf(e),1);
-    const a=spawn(clone(e.node),e.xf,yf),b=spawn(variation(e.node),e.xf,yf);
-    a.vx=-off*2.2;b.vx=off*2.2;a.flash=b.flash=.4;
+    // copies start side by side (no overlap) and drift apart while the game runs, until SPLIT_RADIUS
+    const half=e.w/W/2+.02, sx=x=>Math.min(.95,Math.max(.05,x));
+    const a=spawn(clone(e.node),sx(e.xf-half),yf),b=spawn(variation(e.node),sx(e.xf+half),yf);
+    a.mate=b.id;b.mate=a.id;a.flash=b.flash=.4;
     S.target=a;burst(e,'#ff47d6',12,.7);sfx.bad();sfx.split();
     S.floats.push({x:boxX(e),y:boxY(e),t:'SPLIT!',c:'#ff47d6',life:1});
   }
@@ -343,7 +337,14 @@ function update(dt){
   S.spawnT-=dt;
   const iv=4.2/(S.tier.speed*S.cfg.speed);
   if(S.toSpawn>0&&((S.spawnT<=0&&S.exprs.length<maxOn())||!S.exprs.length&&S.spawnT>.5)){spawn();S.toSpawn--;S.spawnT=iv;}
-  if(!S.toSpawn&&!S.exprs.length&&!S.clearing){S.clearing=true;setTimeout(()=>{if(S.state==='play')levelUp()},600);}
+  if(!S.toSpawn&&!S.exprs.length&&!S.clearing){S.clearing=true;setTimeout(()=>{if(S.state==='play'&&!S.exprs.length&&!S.toSpawn)levelUp();else S.clearing=false;},600);}
+  // split partners push apart slowly until they are SPLIT_RADIUS apart (fractions of field width)
+  for(const e of S.exprs){
+    if(e.mate==null)continue;
+    const m=S.exprs.find(o=>o.id===e.mate);
+    if(!m||Math.abs(e.xf-m.xf)>=SPLIT_RADIUS){e.mate=null;if(m)m.mate=null;continue;}
+    e.xf+=Math.sign(e.xf-m.xf||1)*SPLIT_SPEED*dt;
+  }
   const vy=1/fallTime();
   for(const e of [...S.exprs]){
     measure(e);
@@ -351,7 +352,7 @@ function update(dt){
     const half=e.w/2/W+.01;e.xf=Math.min(1-half,Math.max(half,e.xf));
     if(boxY(e)+e.h>=groundY()){
       S.exprs.splice(S.exprs.indexOf(e),1);burst(e,'#ff4545',30,1.2);sfx.land();
-      S.floats.push({x:boxX(e),y:groundY()-e.h-10,t:'was '+(ev(e.node,S.env)?'T':'F'),c:'#ff4545',life:1.8});
+      S.floats.push({x:boxX(e),y:groundY()-e.h-10,t:'was '+(ev(e.node)?'T':'F'),c:'#ff4545',life:1.8});
       S.lives--;S.streak=0;S.shake=reduceMotion?0:.4;S.flash=.35;hud();
       if(S.lives<=0){S.exprs.forEach(o=>burst(o,'#ff4545',14,1));S.exprs=[];gameOver();break;}
     }
@@ -407,7 +408,6 @@ function draw(now){
     if(Math.sin(t*4)>-.3)txt('▌▌ FROZEN',W/2,22,Math.max(11,Math.min(16,W/40)),'#43f3ff',disp,12);
     txt('take your time · T / F still work · SPACE resumes',W/2,46,11,'#7a83b8',mono,0);}
   if(S.flash>0){ctx.fillStyle=`rgba(255,69,69,${S.flash*.5})`;ctx.fillRect(-20,-20,W+40,H+40);}
-  if(S.state==='play'&&S.tier.v&&!S.banner){ctx.textAlign='right';txt(envText(),W-10,14,12,'rgba(122,131,184,.9)',`700 ${mono}`,0);ctx.textAlign='center';}
 }
 let last=performance.now();
 function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now;update(dt);draw(now);requestAnimationFrame(loop);}
@@ -457,8 +457,27 @@ tap('bT',()=>answer(true));tap('bF',()=>answer(false));tap('bZ',toggleFreeze);
 tap('bStart',startGame);tap('bAgain',startGame);
 tap('bMenu',()=>{$('ovOver').hidden=true;$('ovTitle').hidden=false;S.state='title';});
 tap('bSfx',()=>{audioInit();sfxOn=!sfxOn;$('bSfx').classList.toggle('on',sfxOn);});
+tap('bSave',saveState);
+tap('bSettings',()=>{const s=$('settings');s.hidden=!s.hidden;$('bSettings').textContent=s.hidden?'SETTINGS':'HIDE SETTINGS';});
+
+/* save state: downloads the current game as JSON (and copies it) so it can be inspected later */
+function snapshot(){
+  const t=validTarget();
+  return {savedAt:new Date().toISOString(),state:S.state,level:S.level,score:S.score,lives:S.lives,hits:S.hits,miss:S.miss,
+    frozen:S.frozen,toSpawn:S.toSpawn,clearing:S.clearing,spawnT:S.spawnT,pause:S.pause,
+    cfg:S.cfg,tier:{ops:S.tier.ops,n:S.tier.n,speed:S.tier.speed,label:S.tier.label},
+    target:t?t.id:null,
+    exprs:S.exprs.map(e=>({id:e.id,txt:e.txt,node:e.node,xf:e.xf,yf:e.yf,vx:e.vx,size:e.size,truth:ev(e.node)}))};
+}
+function saveState(){
+  const json=JSON.stringify(snapshot(),null,2);
+  try{if(navigator.clipboard)navigator.clipboard.writeText(json).catch(()=>{});}catch(e){}
+  try{const url=URL.createObjectURL(new Blob([json],{type:'application/json'}));
+    const a=document.createElement('a');a.href=url;a.download=`logic-blaster-state-${Date.now()}.json`;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){}
+}
 
 /* attract mode behind the title: a few drifting sample expressions */
-readCfg();newEnv();hud();setFreezeLabel();
+readCfg();hud();setFreezeLabel();
 (function attract(){if(S.state==='title'){if(S.exprs.length<4)spawn();for(const e of S.exprs){e.yf+=.004;if(e.yf>.9)S.exprs.splice(S.exprs.indexOf(e),1);}}setTimeout(attract,120);})();
 </script>
