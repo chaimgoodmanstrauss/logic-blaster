@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Logic Blaster</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,21 +28,21 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidde
 #stage::after{content:"";position:absolute;inset:0;pointer-events:none;
   background:repeating-linear-gradient(to bottom,rgba(0,0,0,.28) 0 1px,transparent 1px 3px);
   box-shadow:inset 0 0 90px rgba(0,0,0,.75)}
-.ov{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(4,5,13,.82);overflow:auto}
+.ov{position:absolute;inset:0;z-index:2;display:flex;padding:16px;background:rgba(4,5,13,.82);overflow:auto}
 [hidden]{display:none!important} /* .ov sets display:flex, which would otherwise override the hidden attribute */
-.card{max-width:560px;width:100%;display:flex;flex-direction:column;gap:14px;text-align:center}
+.card{max-width:620px;width:100%;margin:auto;display:flex;flex-direction:column;gap:14px;text-align:center} /* margin:auto centers without clipping overflow at the top */
 .card h1{font-family:var(--disp);font-size:clamp(22px,5.5vw,40px);line-height:1.25;margin:0;color:var(--yel);
   text-shadow:3px 3px 0 var(--mag),-2px -2px 0 var(--cyan)}
 .card h2{font-family:var(--disp);font-size:clamp(16px,4vw,26px);margin:0;color:var(--red)}
 .card p{margin:0;color:var(--dim);font-size:13px;line-height:1.6}
-.card p kbd{color:var(--fg);border:1px solid var(--line);padding:0 5px;background:var(--panel);font-family:var(--mono)}
-.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;text-align:left}
-.opts label{display:flex;flex-direction:column;gap:5px;font-family:var(--disp);font-size:9px;color:var(--cyan);letter-spacing:.08em}
+.card p kbd{color:var(--fg);border:1px solid var(--line);padding:0 5px;background:var(--panel);font-family:var(--mono);white-space:nowrap}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px 12px;text-align:left;background:var(--panel);border:1px solid var(--line);padding:16px}
+.opts label{display:flex;flex-direction:column;gap:6px;font-family:var(--disp);font-size:10px;line-height:1.4;color:var(--cyan);letter-spacing:.04em}
 .opts select{font-family:var(--mono);font-size:14px;color:var(--fg);background:var(--panel);border:1px solid var(--line);padding:6px}
 .keyb{font-family:var(--mono);font-size:16px;color:var(--yel);background:var(--panel);border:1px solid var(--line);padding:6px;cursor:pointer;text-align:center}
 .keyb.wait{border-color:var(--yel);animation:bl .6s steps(2) infinite}
 @keyframes bl{50%{opacity:.4}}
-#bT small,#bF small{display:block;font-family:var(--mono);font-size:11px;margin-top:4px;opacity:.7}
+#bT small,#bF small,#bZ small{display:block;font-family:var(--mono);font-size:11px;margin-top:4px;opacity:.7}
 .big{font-family:var(--disp);font-size:14px;padding:14px 20px;background:var(--yel);color:#120d00;border:0;cursor:pointer;box-shadow:4px 4px 0 var(--mag)}
 .big:active{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--mag)}
 .stats{font-family:var(--disp);font-size:11px;line-height:2;color:var(--fg)}
@@ -51,9 +52,10 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidde
 #bT,#bF{flex:1;font-size:clamp(20px,5vw,30px);padding:10px 0}
 #bT{border-color:var(--cyan);color:var(--cyan)} #bF{border-color:var(--mag);color:var(--mag)}
 #bZ{flex:1.2;font-size:11px;border-color:var(--yel);color:var(--yel)}
+#bT,#bF,#bZ{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding-bottom:10px} /* key captions share one baseline */
 #bZ.on{background:var(--yel);color:#120d00}
 .sm{display:flex;flex-direction:column;gap:6px}
-.sm button{flex:1;font-size:8px;padding:0 8px;border-color:var(--line)!important;color:var(--dim)!important}
+.sm button{flex:1;font-size:9px;padding:0 8px;border-color:var(--line)!important;color:var(--dim)!important}
 .sm button.on{color:var(--grn)!important;border-color:var(--grn)!important}
 #deck button:active{filter:brightness(1.4)}
 button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-offset:2px}
@@ -225,7 +227,7 @@ function startGame(){
   Object.assign(S,{state:'play',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,hitsLvl:0,hits:0,miss:0,
     frozen:false,target:null,spawnT:.6,pause:1.2,streak:0,banner:null});
   S.tier=tier(1);newEnv();banner();
-  $('ovTitle').hidden=true;$('ovOver').hidden=true;$('bZ').classList.remove('on');$('bZ').textContent='FREEZE';
+  $('ovTitle').hidden=true;$('ovOver').hidden=true;$('bZ').classList.remove('on');setFreezeLabel();
   sfx.start();hud();
 }
 function envText(){return S.tier.v?VARS.slice(0,S.tier.v).map(v=>`${v}=${S.env[v]?'T':'F'}`).join('  '):'';}
@@ -288,7 +290,8 @@ function answer(val){
   hud();
 }
 function toggleFreeze(){if(S.state!=='play')return;S.frozen=!S.frozen;
-  $('bZ').classList.toggle('on',S.frozen);$('bZ').textContent=S.frozen?'RESUME':'FREEZE';}
+  $('bZ').classList.toggle('on',S.frozen);setFreezeLabel();}
+function setFreezeLabel(){$('bZ').innerHTML=(S.frozen?'RESUME':'FREEZE')+'<small>space key</small>';}
 
 /* ---------- geometry & effects ---------- */
 const groundY=()=>H-48;
@@ -404,8 +407,8 @@ const kn=k=>k.toUpperCase();
 function renderKeys(){
   $('kT').textContent=binding==='T'?'PRESS A KEY…':kn(S.keys.T);$('kF').textContent=binding==='F'?'PRESS A KEY…':kn(S.keys.F);
   $('kT').classList.toggle('wait',binding==='T');$('kF').classList.toggle('wait',binding==='F');
-  $('bT').innerHTML=`T<small>${kn(S.keys.T)}</small>`;$('bF').innerHTML=`F<small>${kn(S.keys.F)}</small>`;
-  $('help').innerHTML=`<kbd>${kn(S.keys.T)}</kbd> blasts TRUE · <kbd>${kn(S.keys.F)}</kbd> blasts FALSE · <kbd>Space</kbd> freeze as long as you like · <kbd>←</kbd><kbd>→</kbd>/<kbd>Tab</kbd> or tap to pick a target`;
+  $('bT').innerHTML=`T<small>${kn(S.keys.T)} key</small>`;$('bF').innerHTML=`F<small>${kn(S.keys.F)} key</small>`;
+  $('help').innerHTML=`<kbd>${kn(S.keys.T)}</kbd> blasts TRUE · <kbd>${kn(S.keys.F)}</kbd> blasts FALSE · <kbd>Space</kbd> freeze as long as you like · <kbd>←</kbd> <kbd>→</kbd> <kbd>Tab</kbd> or tap to pick a target`;
 }
 function bindKey(which,k){
   const other=which==='T'?'F':'T';
@@ -440,6 +443,6 @@ tap('bMenu',()=>{$('ovOver').hidden=true;$('ovTitle').hidden=false;S.state='titl
 tap('bSfx',()=>{audioInit();sfxOn=!sfxOn;$('bSfx').classList.toggle('on',sfxOn);});
 
 /* attract mode behind the title: a few drifting sample expressions */
-readCfg();newEnv();hud();
+readCfg();newEnv();hud();setFreezeLabel();
 (function attract(){if(S.state==='title'){if(S.exprs.length<4)spawn();for(const e of S.exprs){e.yf+=.004;if(e.yf>.9)S.exprs.splice(S.exprs.indexOf(e),1);}}setTimeout(attract,120);})();
 </script>
