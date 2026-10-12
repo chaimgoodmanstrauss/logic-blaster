@@ -117,14 +117,14 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
   Freeze: S.frozen stops falling, spawning and the music heartbeat only;
           particles/answers keep working.
   Audio:  WebAudio square/triangle/noise synth: tone(), noise(), sfx.* (effects only: fire, hit, bad, split, land, start, over).
-  Levels: LEVELS[1..10] follow outline.csv exactly (setLevel); speed is fixed. waveSize(L)=4+floor(L/2) expressions per level.
+  Levels: LEVEL_SPEC (plain text, one line per level, parsed by parseSpec) lists each level's forms; setLevel picks per expression. Speed is fixed. waveSize(L)=8+2*floor(L/2); longer expressions fall and arrive more slowly (slow()).
   Keys:   S.keys {T,F} rebindable on title screen, saved in localStorage.
 ========================================================================== */
 const $=id=>document.getElementById(id);
 const cv=$('cv'), ctx=cv.getContext('2d');
 const S={state:'title',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,
   hits:0,miss:0,toSpawn:0,clearing:false,frozen:false,target:null,spawnT:0,pause:0,streak:0,
-  shake:0,flash:0,banner:null,cfg:{leaves:8,speed:1,words:false},nid:1,kindHist:[],tier:{ops:[],hasNot:false,label:'',make:null}};
+  shake:0,flash:0,banner:null,cfg:{leaves:8,speed:1,words:false},nid:1,tier:{ops:[],hasNot:false,label:'',make:null}};
 let W=0,H=0,DPR=1,fs=18,mgen=0;
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 let hi=0; try{hi=+localStorage.getItem('lb_hi')||0}catch(e){}
@@ -133,80 +133,95 @@ let hi=0; try{hi=+localStorage.getItem('lb_hi')||0}catch(e){}
 const rnd=n=>Math.floor(Math.random()*n), pick=a=>a[rnd(a.length)];
 const OPS=['not','and','or','if'], OP_LABEL={not:'NEW: NOT',and:'NEW: AND',or:'NEW: OR',if:'NEW: IF … THEN'};
 // Level kinds: every expression in a level is an instance of that level's kind (random T/F values).
-// LEVELS[L] lists the kinds a level draws from (levels 1-10 match outline.csv). Past level 10 the pool is every
-// kind seen so far plus MIXED. A kind never appears three levels running. Speed never changes; only the content grows.
-const R=()=>({t:'c',v:Math.random()<.5}), N=a=>({t:'not',a}), B=(t,a,b)=>({t,a,b});
-const SYM={and:'∧',or:'∨'};
-const deco=x=>{const y=x.t==='c'?x:x.t==='not'?{t:'not',a:deco(x.a)}:{t:x.t,a:deco(x.a),b:deco(x.b)};return Math.random()<.35?N(y):y;};
-const T3=[];
-for(const o1 of ['and','or'])for(const o2 of ['and','or']){
-  T3.push({n:3,ops:[o1,o2],name:`(P ${SYM[o1]} Q) ${SYM[o2]} R`,make:()=>B(o2,B(o1,R(),R()),R())});
-  T3.push({n:3,ops:[o1,o2],name:`P ${SYM[o1]} (Q ${SYM[o2]} R)`,make:()=>B(o1,R(),B(o2,R(),R()))});
+/* ---------- level spec: edit LEVEL_SPEC to change the levels ---------- */
+const LEVEL_SPEC=`
+# One line per level, in order. Insert or delete a line to insert or delete a level.
+# A comma means "or this form": each expression in the level is randomly one of the listed forms.
+# Variables: a capital letter other than T and F. Each is a random T or F per expression (same letter = same value).
+# Constants: T and F.  Operators: not or ~ (negate), and, or, -> (if..then).  Brackets group.  Precedence: not > and > or > ->.
+# A "where X Y = a, b, c" line applies to the level line directly above it: X and Y are picked from the listed constants instead of T/F.
+# Levels past the last one use every form above, plus random trees.
+
+P
+~P, P
+P or Q
+P and Q
+P and Q, P or Q
+P and Q, P or Q, ~(P and Q), ~(P or Q)
+P and Q, P or Q, ~P and Q, P and ~Q, ~P or Q, P or ~Q, ~P and ~Q, ~P or ~Q
+P and Q, P or Q, ~P and Q, P and ~Q, ~P or Q, P or ~Q, ~P and ~Q, ~P or ~Q, ~(P and Q), ~(P or Q), ~(~P and Q), ~(P and ~Q), ~(~P or Q), ~(P or ~Q), ~(~P and ~Q), ~(~P or ~Q)
+(P and Q) and R, P and (Q and R), (P and Q) or R, P and (Q or R), (P or Q) and R, P or (Q and R), (P or Q) or R, P or (Q or R)
+(U and V) and W, U and (V and W), (U and V) or W, U and (V or W), (U or V) and W, U or (V and W), (U or V) or W, U or (V or W)
+where U V W = T, ~T, F, ~F
+`;
+
+const isVar=x=>/^[A-Z]$/.test(x);
+function tokenize(s){const out=[],re=/\s*(->|[()~]|\b(?:and|or|not)\b|[a-z]|\S)/gy;let m;
+  while((m=re.exec(s.toLowerCase())))out.push(/^[a-z]$/.test(m[1])?m[1].toUpperCase():m[1]);
+  return out;}
+function parseForm(text){ // precedence: not > and > or > ->
+  const toks=tokenize(text);let i=0;
+  const fail=m=>{throw new Error(`"${text}": ${m}`);};
+  const peek=()=>toks[i];
+  const imp=()=>{const a=disj();if(peek()==='->'){i++;return {t:'if',a,b:imp()};}return a;};
+  const disj=()=>{let a=conj();while(peek()==='or'){i++;a={t:'or',a,b:conj()};}return a;};
+  const conj=()=>{let a=neg();while(peek()==='and'){i++;a={t:'and',a,b:neg()};}return a;};
+  const neg=()=>{const t=toks[i++];
+    if(t===undefined)fail('unfinished');
+    if(t==='not'||t==='~')return {t:'not',a:neg()};
+    if(t==='('){const e=imp();if(toks[i++]!==')')fail('missing )');return e;}
+    if(t==='T'||t==='F')return {t:'c',v:t==='T'};
+    if(isVar(t))return {t:'var',v:t};
+    return fail(`unexpected "${t}"`);};
+  const e=imp();
+  if(i<toks.length)fail(`unexpected "${toks[i]}"`);
+  return e;
 }
-const K={
-  TF:{n:1,ops:[],name:'T / F',make:R},
-  NOT:{n:1,ops:['not'],name:'¬P',make:()=>N(R())},
-  NOTNOT:{n:1,ops:['not'],name:'¬¬P',make:()=>N(N(R()))},
-  AND:{n:2,ops:['and'],name:'P ∧ Q',make:()=>B('and',R(),R())},
-  OR:{n:2,ops:['or'],name:'P ∨ Q',make:()=>B('or',R(),R())},
-  NOTOR_L:{n:2,ops:['or','not'],name:'¬P ∨ Q',make:()=>B('or',N(R()),R())},
-  NOTOR_R:{n:2,ops:['or','not'],name:'P ∨ ¬Q',make:()=>B('or',R(),N(R()))},
-  NOTAND_L:{n:2,ops:['and','not'],name:'¬P ∧ Q',make:()=>B('and',N(R()),R())},
-  NOTAND_R:{n:2,ops:['and','not'],name:'P ∧ ¬Q',make:()=>B('and',R(),N(R()))},
-  NOTNOTOR:{n:2,ops:['or','not'],name:'¬P ∨ ¬Q',make:()=>B('or',N(R()),N(R()))},
-  NEG_OR:{n:2,ops:['or','not'],name:'¬(P ∨ Q)',make:()=>N(B('or',R(),R()))},
-  NEG_AND:{n:2,ops:['and','not'],name:'¬(P ∧ Q)',make:()=>N(B('and',R(),R()))},
-  NEG_BOTH:{n:2,ops:['and','not'],name:'¬P ∧ ¬Q',make:()=>B('and',N(R()),N(R()))},
-  ...Object.fromEntries(T3.map((k,i)=>['T3_'+i,k])),
-  NOTS3:{n:3,ops:['and','or','not'],name:'NOTS ANYWHERE',make:()=>deco(pick(T3).make())},
-  IF:{n:2,ops:['if'],name:'P → Q',make:()=>B('if',R(),R())},
-  IF_NP:{n:2,ops:['if','not'],name:'¬P → Q',make:()=>B('if',N(R()),R())},
-  IF_NQ:{n:2,ops:['if','not'],name:'P → ¬Q',make:()=>B('if',R(),N(R()))},
-  IF_NPNQ:{n:2,ops:['if','not'],name:'¬P → ¬Q',make:()=>B('if',N(R()),N(R()))},
-  IF_NEG:{n:2,ops:['if','not'],name:'¬(P → Q)',make:()=>N(B('if',R(),R()))},
-  IF3:{n:3,ops:['if','and','or','not'],name:'IF WITH ∧ ∨',make:()=>{const o=pick(['and','or']),g=B('if',R(),R()),t=Math.random()<.5?B(o,g,R()):B(o,R(),g);return Math.random()<.5?deco(t):t;}},
-  RAND:{n:0,ops:['and','or','if','not'],name:'MIXED',make:()=>gen(Math.min(S.cfg.leaves,randN(S.level)))},
-  // outline.csv level 7 forms, used as the inside of level 8's x(uP y vQ)
-  WRAP8:{n:4,ops:['and','or','not'],name:'¬(uP y vQ)',make:()=>{const e=K[pick(L7)].make();return Math.random()<.5?N(e):e;}},
-  // outline.csv level 10: (U x V) y W or U x (V y W), U,V,W = T, ¬T, F, ¬F
-  MIX10:{n:3,ops:['and','or'],name:'(U x V) y W',make:()=>{const x=pick(['and','or']),y=pick(['and','or']),g=()=>LIT();
-    return Math.random()<.5?B(y,B(x,g(),g()),g()):B(x,g(),B(y,g(),g()));}},
-};
-const L7=['AND','OR','NOTAND_L','NOTAND_R','NOTOR_L','NOTOR_R','NOTNOTOR','NEG_BOTH'];
-const LIT=()=>pick([{t:'c',v:true},N({t:'c',v:true}),{t:'c',v:false},N({t:'c',v:false})]);
-const T3K=Object.keys(K).filter(k=>k.startsWith('T3_'));
-const LEVELS=[null, // index = level number (outline.csv)
-  ['TF'],                         // 1  P
-  ['NOT','TF'],                   // 2  ~P, P
-  ['OR'],                         // 3  P or Q
-  ['AND'],                        // 4  P and Q
-  ['AND','OR'],                   // 5  P y Q
-  ['AND','OR','NEG_AND','NEG_OR'],// 6  x(P y Q)
-  L7,                             // 7  uP y vQ
-  ['WRAP8'],                      // 8  x(uP y vQ)
-  T3K,                            // 9  (P x Q) y R, P x (Q y R)
-  ['MIX10'],                      // 10 (U x V) y W, U x (V y W)
-];
-const randN=L=>Math.min(8,3+Math.floor(Math.max(0,L-11)/3)); // past level 10, random trees gain a leaf every three levels
-function setLevel(L){ // picks this level's kind and sets S.tier (ops/not allowed for mutation)
-  if(L<=10){ // outline.csv levels: each expression takes a random form from the level's list
-    const pool=LEVELS[L].filter(k=>K[k].n<=S.cfg.leaves);
-    const ops=[...new Set(pool.flatMap(x=>K[x].ops))];
-    S.tier={kind:'L'+L,label:pool.length<=3?pool.map(k=>K[k].name).join('  ·  '):'MIXED FORMS',ops,hasNot:ops.includes('not'),make:()=>K[pick(pool)].make()};
-    return;
+function varsOf(n,acc=new Set()){if(n.t==='var')acc.add(n.v);if(n.a)varsOf(n.a,acc);if(n.b)varsOf(n.b,acc);return acc;}
+function opsOf(n,acc=new Set()){if(n.t!=='var'&&n.t!=='c')acc.add(n.t);if(n.a)opsOf(n.a,acc);if(n.b)opsOf(n.b,acc);return acc;}
+function bind(n,env){switch(n.t){
+  case'var':return {t:'c',v:env[n.v]};
+  case'c':return {t:'c',v:n.v};
+  case'not':return {t:'not',a:bind(n.a,env)};
+  default:return {t:n.t,a:bind(n.a,env),b:bind(n.b,env)};}}
+function parseSpec(text){
+  const levels=[];
+  text.split('\n').forEach(raw=>{
+    const line=raw.replace(/#.*$/,'').trim();if(!line)return;
+    const where=line.match(/^where\s+(.+?)\s*=\s*(.+)$/i);
+    if(where){
+      if(!levels.length)throw new Error(`"${line}": where must follow a level line`);
+      const dom=where[2].split(',').map(x=>x.trim()).filter(Boolean).map(x=>ev(bind(parseForm(x),{})));
+      for(const v of where[1].split(/[\s,]+/).filter(Boolean))levels.at(-1).dom[v.toUpperCase()]=dom;
+      return;
+    }
+    const lv={n:levels.length+1,forms:[],dom:{}};levels.push(lv);
+    for(const f of line.split(',').map(x=>x.trim()).filter(Boolean))lv.forms.push({text:f,tree:parseForm(f),dom:lv.dom});
+    if(!lv.forms.length)throw new Error(`level ${lv.n} ("${line}") has no forms`);
+  });
+  if(!levels.length)throw new Error('no levels in LEVEL_SPEC');
+  return levels;
+}
+let LEVELS,SPEC_ERR='';
+try{LEVELS=parseSpec(LEVEL_SPEC);}
+catch(e){SPEC_ERR=e.message;console.error('LEVEL_SPEC: '+e.message);LEVELS=[{n:1,forms:[{text:'P',tree:{t:'var',v:'P'},dom:{}}],dom:{}}];}
+const LAST_N=LEVELS.at(-1).n, ALL_FORMS=LEVELS.flatMap(x=>x.forms);
+const levelFor=L=>{let lv=LEVELS[0];for(const x of LEVELS)if(x.n<=L)lv=x;return lv;};
+function instantiate(f){const env={};for(const v of varsOf(f.tree)){const d=f.dom[v];env[v]=d?pick(d):Math.random()<.5;}return bind(f.tree,env);}
+const randN=L=>Math.min(8,3+Math.floor(Math.max(0,L-LAST_N)/3)); // past the spec, random trees gain a leaf every three levels
+function setLevel(L){ // sets S.tier: the forms for this level (ops/not allowed for mutation)
+  const label=SPEC_ERR?'SPEC ERROR: '+SPEC_ERR:null;
+  if(L<=LAST_N){
+    const lv=levelFor(L),forms=lv.forms,ops=[...new Set(forms.flatMap(f=>[...opsOf(f.tree)]))];
+    S.tier={kind:'L'+lv.n,label:label||(forms.length<=3?forms.map(f=>f.text).join('  ·  '):'MIXED FORMS'),ops,hasNot:ops.includes('not'),
+      make:()=>instantiate(pick(forms))};
+  }else{
+    S.tier={kind:'MIXED',label:label||'MIXED',ops:['and','or','if','not'],hasNot:true,
+      make:()=>Math.random()<.5?gen(Math.min(S.cfg.leaves,randN(L))):instantiate(pick(ALL_FORMS))};
   }
-  const pool=[...new Set(LEVELS.slice(1).flat()),'RAND'].filter(k=>K[k].n<=S.cfg.leaves||k==='RAND');
-  const last2=S.kindHist.slice(-2);
-  let cand=pool.filter(k=>!(last2.length===2&&last2[0]===k&&last2[1]===k));
-  if(!cand.length)cand=pool;
-  const others=cand.filter(k=>k!=='RAND');
-  const k=(others.length&&!(cand.includes('RAND')&&Math.random()<.34))?pick(others):'RAND';
-  S.kindHist.push(k);
-  const ops=[...new Set(pool.flatMap(x=>K[x].ops))];
-  S.tier={kind:k,label:K[k].name,ops,hasNot:ops.includes('not'),make:K[k].make};
 }
 const SPLIT_RADIUS=.25, SPLIT_SPEED=.02; // copies drift apart to this distance at this rate (per second, fraction of field width)
-const waveSize=L=>4+Math.floor(L/2); // expressions per level; the level ends when they are all blasted or landed
+const waveSize=L=>2*(4+Math.floor(L/2)); // expressions per level (twice the old count); the level ends when they are all blasted or landed
 function leaf(){return {t:'c',v:Math.random()<.5};}
 function gen(n){ // n = number of leaves
   const ops=S.tier.ops,bin=ops.filter(o=>o!=='not'),hasNot=ops.includes('not');
@@ -287,13 +302,14 @@ function startGame(){
   audioInit();readCfg();
   Object.assign(S,{state:'play',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,toSpawn:waveSize(1),clearing:false,
     hits:0,miss:0,
-    frozen:false,target:null,spawnT:.6,pause:1.2,streak:0,banner:null,kindHist:[]});
+    frozen:false,target:null,spawnT:.6,pause:1.2,streak:0,banner:null});
   setLevel(1);banner();
   $('ovTitle').hidden=true;$('ovOver').hidden=true;$('bZ').classList.remove('on');setFreezeLabel();
   sfx.start();hud();
 }
 function banner(){S.banner={t:'LEVEL '+S.level,s:S.tier.label,life:2.6};}
 function fallTime(){return 17/S.cfg.speed;}
+const slow=size=>Math.min(2,Math.max(1,size/4)); // fall-time multiplier: sizes up to 4 are normal, longer expressions are slower (max x2)
 function maxOn(){return Math.min(7,3+Math.floor(S.level/3));}
 function spawn(node,xf,yf){
   node=node||S.tier.make();
@@ -387,7 +403,7 @@ function update(dt){
   if(S.pause>0){S.pause-=dt;return;}
   S.spawnT-=dt;
   const iv=4.2/S.cfg.speed;
-  if(S.toSpawn>0&&((S.spawnT<=0&&S.exprs.length<maxOn())||!S.exprs.length&&S.spawnT>.5)){spawn();S.toSpawn--;S.spawnT=iv;}
+  if(S.toSpawn>0&&((S.spawnT<=0&&S.exprs.length<maxOn())||!S.exprs.length&&S.spawnT>.5)){const ne=spawn();S.toSpawn--;S.spawnT=iv*slow(ne.size);}
   if(!S.toSpawn&&!S.exprs.length&&!S.clearing){S.clearing=true;setTimeout(()=>{if(S.state==='play'&&!S.exprs.length&&!S.toSpawn)levelUp();else S.clearing=false;},600);}
   // split partners push apart slowly until they are SPLIT_RADIUS apart (fractions of field width)
   for(const e of S.exprs){
@@ -396,10 +412,9 @@ function update(dt){
     if(!m||Math.abs(e.xf-m.xf)>=SPLIT_RADIUS){e.mate=null;if(m)m.mate=null;continue;}
     e.xf+=Math.sign(e.xf-m.xf||1)*SPLIT_SPEED*dt;
   }
-  const vy=1/fallTime();
   for(const e of [...S.exprs]){
     measure(e);
-    e.yf+=vy*dt;e.xf+=e.vx*dt;e.vx*=Math.pow(.02,dt);
+    e.yf+=dt/(fallTime()*slow(e.size));e.xf+=e.vx*dt;e.vx*=Math.pow(.02,dt);
     const half=e.w/2/W+.01;e.xf=Math.min(1-half,Math.max(half,e.xf));
     if(boxY(e)+e.h>=groundY()){
       S.exprs.splice(S.exprs.indexOf(e),1);burst(e,'#ff4545',30,1.2);sfx.land();
