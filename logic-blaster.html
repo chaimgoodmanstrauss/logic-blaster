@@ -44,6 +44,13 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidde
 .big:active{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--mag)}
 .stats{font-family:var(--disp);font-size:11px;line-height:2;color:var(--fg)}
 .stats span{color:var(--yel)}
+.entry{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:12px 0}
+.entry input{font-family:var(--mono);font-size:14px;color:var(--fg);background:var(--panel);border:1px solid var(--line);padding:10px;width:12em;text-transform:uppercase}
+.board{font-family:var(--mono);font-size:13px;color:var(--fg);margin:10px 0;text-align:left}
+.board table{width:100%;border-collapse:collapse}
+.board td{padding:3px 8px;border-bottom:1px solid var(--line)}
+.board td.n{text-align:right;color:var(--yel)}
+.board tr.mine td{color:var(--mag)}
 #deck{display:flex;gap:8px;align-items:stretch}
 #deck button{font-family:var(--disp);cursor:pointer;border:2px solid;background:var(--panel);color:var(--fg)}
 #bT,#bF{flex:1;font-size:clamp(20px,5vw,30px);padding:10px 0}
@@ -88,8 +95,10 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
     </div>
     <div class="ov" id="ovOver" hidden>
       <div class="card">
-        <h2>GAME OVER</h2>
+        <h2 id="overTitle">GAME OVER</h2>
         <div class="stats" id="overStats"></div>
+        <div class="entry"><input id="oName" maxlength="12" placeholder="YOUR NAME" aria-label="Name for leaderboard"><button class="big" id="bRecord">SAVE SCORE</button></div>
+        <div class="board" id="board"></div>
         <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
           <button class="big" id="bAgain">PLAY AGAIN</button>
           <button class="big" id="bMenu" style="background:var(--cyan)">SETTINGS</button>
@@ -144,16 +153,29 @@ const LEVEL_SPEC=`
 
 P
 ~P, P
+P,~P,~~P
 P or Q
+P or ~Q, ~P or Q, P or Q
+P or ~Q, ~P or Q, P or Q, ~P or ~Q
 P and Q
+P and ~Q, ~P and Q, P and Q
+P and ~Q, ~P and Q, P and Q, ~P and ~Q
 P and Q, P or Q
-P and Q, P or Q, ~(P and Q), ~(P or Q)
 P and Q, P or Q, ~P and Q, P and ~Q, ~P or Q, P or ~Q, ~P and ~Q, ~P or ~Q
+P and Q, P or Q, ~(P and Q), ~(P or Q)
 P and Q, P or Q, ~P and Q, P and ~Q, ~P or Q, P or ~Q, ~P and ~Q, ~P or ~Q, ~(P and Q), ~(P or Q), ~(~P and Q), ~(P and ~Q), ~(~P or Q), ~(P or ~Q), ~(~P and ~Q), ~(~P or ~Q)
 (P and Q) and R, P and (Q and R), (P and Q) or R, P and (Q or R), (P or Q) and R, P or (Q and R), (P or Q) or R, P or (Q or R)
 (U and V) and W, U and (V and W), (U and V) or W, U and (V or W), (U or V) and W, U or (V and W), (U or V) or W, U or (V or W)
 where U V W = T, ~T, F, ~F
+U->V
+where U V W = T, ~T, F, ~F
+P or ~Q, Q -> P, P->Q, P and Q, P or Q, P and ~Q, ~P and Q, ~P or Q, P or ~Q
+U->V
+where U V = P and Q, P or Q, P and ~Q, ~P and Q, ~P or Q, P or ~Q, ~(P and Q), ~(P or Q), ~(~P and Q), ~(P and ~Q), ~(~P or Q), ~(P or ~Q), ~(~P and ~Q), ~(~P or ~Q)
+U->V, U->(V or W), (U and V)->W, (U or V)->W, U->(V and W), (U->V)->W, U->(V->W)
+where U V W = T, ~T, F, ~F
 `;
+
 
 const isVar=x=>/^[A-Z]$/.test(x);
 function tokenize(s){const out=[],re=/\s*(->|[()~]|\b(?:and|or|not)\b|[a-z]|\S)/gy;let m;
@@ -327,11 +349,32 @@ function levelUp(){
   S.exprs=[];S.target=null;S.pause=2.6;S.spawnT=.4;
   banner();hud();
 }
-function gameOver(){
+function gameOver(won=false){
   S.state='over';if(S.score>hi){hi=S.score;try{localStorage.setItem('lb_hi',hi)}catch(e){}}
   const acc=S.hits+S.miss?Math.round(100*S.hits/(S.hits+S.miss)):0;
-  $('overStats').innerHTML=`SCORE <span>${S.score}</span><br>LEVEL <span>${S.level}</span><br>BLASTED <span>${S.hits}</span> · SPLITS <span>${S.miss}</span><br>ACCURACY <span>${acc}%</span><br>HIGH <span>${hi}</span>`;
-  setTimeout(()=>{if(S.state==='over')$('ovOver').hidden=false},1400);sfx.over();hud();
+  S.acc=acc;S.won=won;
+  $('overTitle').textContent=won?'VICTORY':'GAME OVER';
+  $('overStats').innerHTML=(won?`ALL ${LAST_N} LEVELS CLEARED<br>`:'')+`SCORE <span>${S.score}</span><br>LEVEL <span>${S.level}</span><br>BLASTED <span>${S.hits}</span> · SPLITS <span>${S.miss}</span><br>ACCURACY <span>${acc}%</span><br>HIGH <span>${hi}</span>`;
+  let nm='';try{nm=localStorage.getItem('lb_name')||''}catch(e){}
+  $('oName').value=nm;$('bRecord').disabled=false;$('bRecord').textContent='SAVE SCORE';
+  renderBoard(-1);
+  setTimeout(()=>{if(S.state==='over')$('ovOver').hidden=false},1400);won?sfx.start():sfx.over();hud();
+}
+// leaderboard: top 10 runs in this browser (localStorage 'lb_board')
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function board(){try{return JSON.parse(localStorage.getItem('lb_board'))||[]}catch(e){return []}}
+function renderBoard(mark){
+  const b=board();
+  $('board').innerHTML=b.length?`<table>${b.map((r,i)=>`<tr class="${i===mark?'mine':''}"><td class="n">${i+1}</td><td>${esc(r.name)}</td><td class="n">${r.score}</td><td>L${r.level}</td><td>${r.won?'WON':''}</td><td>${r.date}</td></tr>`).join('')}</table>`:'NO SCORES YET';
+}
+function recordScore(){
+  const name=($('oName').value.trim()||'ANON').slice(0,12).toUpperCase();
+  try{localStorage.setItem('lb_name',name)}catch(e){}
+  const entry={name,score:S.score,level:S.level,acc:S.acc,won:S.won,date:new Date().toISOString().slice(0,10)};
+  const b=board();b.push(entry);b.sort((x,y)=>y.score-x.score);b.splice(10);
+  try{localStorage.setItem('lb_board',JSON.stringify(b))}catch(e){}
+  $('bRecord').disabled=true;$('bRecord').textContent='SAVED';
+  renderBoard(b.indexOf(entry));
 }
 function hud(){
   $('hScore').textContent=S.score;$('hLvl').textContent=S.level;
@@ -404,7 +447,7 @@ function update(dt){
   S.spawnT-=dt;
   const iv=4.2/S.cfg.speed;
   if(S.toSpawn>0&&((S.spawnT<=0&&S.exprs.length<maxOn())||!S.exprs.length&&S.spawnT>.5)){const ne=spawn();S.toSpawn--;S.spawnT=iv*slow(ne.size);}
-  if(!S.toSpawn&&!S.exprs.length&&!S.clearing){S.clearing=true;setTimeout(()=>{if(S.state==='play'&&!S.exprs.length&&!S.toSpawn)levelUp();else S.clearing=false;},600);}
+  if(!S.toSpawn&&!S.exprs.length&&!S.clearing){S.clearing=true;setTimeout(()=>{if(S.state==='play'&&!S.exprs.length&&!S.toSpawn){if(S.level>=LAST_N)gameOver(true);else levelUp();}else S.clearing=false;},600);}
   // split partners push apart slowly until they are SPLIT_RADIUS apart (fractions of field width)
   for(const e of S.exprs){
     if(e.mate==null)continue;
@@ -505,7 +548,7 @@ addEventListener('keydown',ev_=>{
     if(k==='escape'){binding=null;renderKeys();return}
     if(ev_.key.length===1&&k!==' ')bindKey(binding,k);return;}
   if(S.state!=='play'){
-    if(k==='enter'&&(!$('ovTitle').hidden||!$('ovOver').hidden)&&!document.activeElement.closest('.opts')){ev_.preventDefault();startGame();}
+    if(k==='enter'&&(!$('ovTitle').hidden||!$('ovOver').hidden)&&!document.activeElement.closest('.opts')&&document.activeElement.id!=='oName'){ev_.preventDefault();startGame();}
     return;}
   if(k===S.keys.T){if(!ev_.repeat)answer(true);}
   else if(k===S.keys.F){if(!ev_.repeat)answer(false);}
@@ -519,7 +562,7 @@ cv.addEventListener('pointerdown',e=>{if(S.state!=='play')return;const r=cv.getB
   if(hit){S.target=hit;}});
 const tap=(id,fn)=>$(id).addEventListener('click',e=>{fn();e.currentTarget.blur();});
 tap('bT',()=>answer(true));tap('bF',()=>answer(false));tap('bZ',toggleFreeze);
-tap('bStart',startGame);tap('bAgain',startGame);
+tap('bStart',startGame);tap('bAgain',startGame);tap('bRecord',recordScore);
 tap('bMenu',()=>{$('ovOver').hidden=true;$('ovTitle').hidden=false;S.state='title';});
 tap('bSfx',()=>{audioInit();sfxOn=!sfxOn;$('bSfx').classList.toggle('on',sfxOn);});
 tap('bSave',saveState);
