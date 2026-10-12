@@ -402,8 +402,7 @@ function draw(now){
   for(const f of S.floats){ctx.globalAlpha=Math.min(1,f.life*1.5);txt(f.t,f.x,f.y,12,f.c,disp,8);}ctx.globalAlpha=1;
   if(S.banner){const a=Math.min(1,S.banner.life*2);ctx.globalAlpha=a;
     txt(S.banner.t,W/2,H*.38,Math.max(16,Math.min(30,W/22)),'#ffe445',disp,14);
-    txt(S.banner.s,W/2,H*.38+40,Math.max(11,Math.min(16,W/40)),'#43f3ff',disp,10);
-    txt(S.banner.s2,W/2,H*.38+72,Math.max(14,Math.min(22,W/30)),'#e9ecff',`700 ${mono}`,8);ctx.globalAlpha=1;}
+    txt(S.banner.s,W/2,H*.38+40,Math.max(11,Math.min(16,W/40)),'#43f3ff',disp,10);ctx.globalAlpha=1;}
   if(S.frozen){ctx.fillStyle='rgba(67,243,255,.07)';ctx.fillRect(0,0,W,H);
     if(Math.sin(t*4)>-.3)txt('▌▌ FROZEN',W/2,22,Math.max(11,Math.min(16,W/40)),'#43f3ff',disp,12);
     txt('take your time · T / F still work · SPACE resumes',W/2,46,11,'#7a83b8',mono,0);}
