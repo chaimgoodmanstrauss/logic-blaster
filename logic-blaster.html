@@ -161,9 +161,9 @@ U or V, U and V
   where U V = T, ~T, F, ~F
 ~P and ~Q, ~(P or Q)
 ~P or ~Q, ~(P and Q)
+~P and ~Q, ~(P or Q), ~P or ~Q, ~(P and Q)
 U or V, U and V, ~(U or V), ~(U and V) 
   where U V = T, ~T, F, ~F 
-~P and ~Q, ~(P or Q), ~P or ~Q, ~(P and Q)
 P -> Q, ~P or Q
 ~(P->Q),P and ~Q
 ~P and ~Q, ~(P or Q), ~P or ~Q, ~(P and Q), ~(P->Q),P->Q
@@ -203,7 +203,7 @@ function parseForm(text){ // precedence: not > and > or > ->
 function varsOf(n,acc=new Set()){if(n.t==='var')acc.add(n.v);if(n.a)varsOf(n.a,acc);if(n.b)varsOf(n.b,acc);return acc;}
 function opsOf(n,acc=new Set()){if(n.t!=='var'&&n.t!=='c')acc.add(n.t);if(n.a)opsOf(n.a,acc);if(n.b)opsOf(n.b,acc);return acc;}
 function bind(n,env){switch(n.t){
-  case'var':return {t:'c',v:env[n.v]};
+  case'var':{const x=env[n.v];return typeof x==='object'?JSON.parse(JSON.stringify(x)):{t:'c',v:x};}
   case'c':return {t:'c',v:n.v};
   case'not':return {t:'not',a:bind(n.a,env)};
   default:return {t:n.t,a:bind(n.a,env),b:bind(n.b,env)};}}
@@ -216,7 +216,7 @@ function parseSpec(text){
       if(!levels.length)throw new Error(`"${line}": where must follow a level line`);
       const dom=where[2].split(',').map(x=>x.trim()).filter(Boolean).map(x=>{const t=parseForm(x);
         if(varsOf(t).size)throw new Error(`"${x}" on the where line must be a constant (T, F, ~T ...), not a form with letters`);
-        return ev(bind(t,{}));});
+        return t;});
       for(const v of where[1].split(/[\s,]+/).filter(Boolean))levels.at(-1).dom[v.toUpperCase()]=dom;
       return;
     }
