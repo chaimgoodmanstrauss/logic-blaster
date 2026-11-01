@@ -155,29 +155,26 @@ const LEVEL_SPEC=`
 # A "where X Y = a, b, c" line applies to the level line directly above it: X and Y are picked from the listed constants instead of T/F.
 # Levels past the last one use every form above, plus random trees.
 
-P
-~P, P
 P,~P,~~P
-P or Q
-P or ~Q, ~P or Q, P or Q
-P or ~Q, ~P or Q, P or Q, ~P or ~Q
-P and Q
-P and ~Q, ~P and Q, P and Q
-P and ~Q, ~P and Q, P and Q, ~P and ~Q
-P and Q, P or Q
-P and Q, P or Q, ~P and Q, P and ~Q, ~P or Q, P or ~Q, ~P and ~Q, ~P or ~Q
-P and Q, P or Q, ~(P and Q), ~(P or Q)
-P and Q, P or Q, ~P and Q, P and ~Q, ~P or Q, P or ~Q, ~P and ~Q, ~P or ~Q, ~(P and Q), ~(P or Q), ~(~P and Q), ~(P and ~Q), ~(~P or Q), ~(P or ~Q), ~(~P and ~Q), ~(~P or ~Q)
+P or Q, P and Q
+U or V, U and V 
+  where U V = T, ~T, F, ~F
+~P and ~Q, ~(P or Q)
+~P or ~Q, ~(P and Q)
+U or V, U and V, ~(U or V), ~(U and V) 
+  where U V = T, ~T, F, ~F 
+~P and ~Q, ~(P or Q), ~P or ~Q, ~(P and Q)
+P -> Q, ~P or Q
+~(P->Q),P and ~Q
+~P and ~Q, ~(P or Q), ~P or ~Q, ~(P and Q), ~(P->Q),P->Q
 (P and Q) and R, P and (Q and R), (P and Q) or R, P and (Q or R), (P or Q) and R, P or (Q and R), (P or Q) or R, P or (Q or R)
 (U and V) and W, U and (V and W), (U and V) or W, U and (V or W), (U or V) and W, U or (V and W), (U or V) or W, U or (V or W)
 where U V W = T, ~T, F, ~F
-U->V
-where U V W = T, ~T, F, ~F
-P or ~Q, Q -> P, P->Q,P->Q,P->~Q,~Q->P,~Q->P, P and Q, P or Q, P and ~Q, ~P and Q, ~P or Q, P or ~Q
-U->V
-where U V = P and Q, P or Q, P and ~Q, ~P and Q, ~P or Q, P or ~Q, ~(P and Q), ~(P or Q), ~(~P and Q), ~(P and ~Q), ~(~P or Q), ~(P or ~Q), ~(~P and ~Q), ~(~P or ~Q)
+(P and Q)->(R and S), (P or Q)->(R and S),(P -> Q)->(R or S),(P and Q)->(R or S),(P -> Q)->(R -> S),(P and Q)->~(R and S),
 U->V, U->(V or W), (U and V)->W, (U or V)->W, U->(V and W), (U->V)->W, U->(V->W)
 where U V W = T, ~T, F, ~F
+U->V, U->(V or W), (U and V)->W, (U or V)->W, U->(V and W), (U->V)->W, U->(V->W)
+where U V W = (T->F), (F->T), (T->T), (F->F),(F and T), (T and F), (F or T), (T or F)
 `;
 
 
@@ -482,6 +479,10 @@ function update(dt){
     }
   }
 }
+function wrapText(t,maxW){ // split on spaces so long banner text (e.g. spec errors) stays on the canvas
+  const out=[];let cur='';
+  for(const w of t.split(' ')){const tryL=cur?cur+' '+w:w;if(cur&&ctx.measureText(tryL).width>maxW){out.push(cur);cur=w;}else cur=tryL;}
+  if(cur)out.push(cur);return out;}
 function txt(t,x,y,size,col,font,glow){ctx.font=`${size}px ${font}`;ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=glow??10;ctx.fillText(t,x,y);ctx.shadowBlur=0;}
 function draw(now){
   const disp=getComputedStyle(document.body).getPropertyValue('--disp'),mono=getComputedStyle(document.body).getPropertyValue('--mono');
@@ -526,7 +527,8 @@ function draw(now){
   for(const f of S.floats){ctx.globalAlpha=Math.min(1,f.life*1.5);txt(f.t,f.x,f.y,12,f.c,disp,8);}ctx.globalAlpha=1;
   if(S.banner){const a=Math.min(1,S.banner.life*2);ctx.globalAlpha=a;
     txt(S.banner.t,W/2,H*.38,Math.max(16,Math.min(30,W/22)),'#ffe445',disp,14);
-    txt(S.banner.s,W/2,H*.38+40,Math.max(11,Math.min(16,W/40)),'#43f3ff',disp,10);ctx.globalAlpha=1;}
+    const sf=Math.max(11,Math.min(16,W/40));ctx.font=`${sf}px ${disp}`;
+    wrapText(S.banner.s,W*.9).forEach((ln,i)=>txt(ln,W/2,H*.38+40+i*(sf+6),sf,'#43f3ff',disp,10));ctx.globalAlpha=1;}
   if(S.frozen){ctx.fillStyle='rgba(67,243,255,.07)';ctx.fillRect(0,0,W,H);
     if(Math.sin(t*4)>-.3)txt('▌▌ FROZEN',W/2,22,Math.max(11,Math.min(16,W/40)),'#43f3ff',disp,12);
     txt('take your time · T / F still work · SPACE resumes',W/2,46,11,'#7a83b8',mono,0);}
