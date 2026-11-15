@@ -130,6 +130,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
   Freeze: S.frozen stops falling, spawning and the music heartbeat only;
           particles/answers keep working.
   Audio:  WebAudio square/triangle/noise synth: tone(), noise(), sfx.* (effects: fire, hit, bad, split, land, start, over; jingle: triumph between levels).
+  Heat:   one shot per COOL_TIME (S.heat 1->0); shots while hot are refused (jam). Misses past MISS_LIMIT in a level add expressions and raise S.pace (reset each level).
   Levels: LEVEL_SPEC (plain text, one line per level, parsed by parseSpec) lists each level's forms; setLevel picks per expression. Speed is fixed. waveSize(L)=8+2*floor(L/2); longer expressions fall and arrive more slowly (slow()).
   Keys:   S.keys {T,F} rebindable on title screen, saved in localStorage.
 ========================================================================== */
@@ -137,7 +138,7 @@ const $=id=>document.getElementById(id);
 const cv=$('cv'), ctx=cv.getContext('2d');
 const S={state:'title',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,
   hits:0,miss:0,toSpawn:0,clearing:false,frozen:false,target:null,spawnT:0,pause:0,streak:0,
-  shake:0,flash:0,banner:null,cfg:{leaves:8,speed:1,words:false},nid:1,tier:{ops:[],hasNot:false,label:'',make:null}};
+  shake:0,flash:0,banner:null,heat:0,pace:1,lvlMiss:0,cfg:{leaves:8,speed:1,words:false},nid:1,tier:{ops:[],hasNot:false,label:'',make:null}};
 let W=0,H=0,DPR=1,fs=18,mgen=0;
 const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 let hi=0; try{hi=+localStorage.getItem('lb_hi')||0}catch(e){}
@@ -315,6 +316,7 @@ const sfx={
   hit(){noise({dur:.45,vol:.5,f:3000,f2:60});tone({f:180,f2:40,type:'triangle',dur:.3,vol:.3});tone({f:660,f2:1320,dur:.1,vol:.12,at:.05})},
   bad(){tone({f:150,f2:90,type:'sawtooth',dur:.28,vol:.25});tone({f:158,f2:95,type:'square',dur:.28,vol:.15})},
   split(){[0,.07,.14].forEach((a,i)=>tone({f:520-i*90,f2:760-i*120,dur:.08,vol:.14,at:.22+a}));tone({f:90,type:'sawtooth',dur:.25,vol:.12,at:.27})},
+  jam(){tone({f:110,type:'square',dur:.06,vol:.12})},
   land(){noise({dur:.9,vol:.6,f:900,f2:40});tone({f:140,f2:30,type:'sawtooth',dur:.8,vol:.3})},
   start(){[262,330,392,523,392,523,659,784].forEach((f,i)=>tone({f,dur:.09,vol:.14,at:i*.07}))},
   triumph(){[523,659,784,1047].forEach((f,i)=>tone({f,dur:.12,vol:.15,at:i*.09}));[523,659,784].forEach(f=>tone({f,type:'triangle',dur:.6,vol:.12,at:.36}));tone({f:1047,dur:.6,vol:.1,at:.36})},
@@ -327,14 +329,14 @@ function readCfg(){S.cfg={leaves:+$('oLeaves').value,speed:+$('oSpeed').value,
 function startGame(){
   audioInit();readCfg();
   Object.assign(S,{state:'play',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,toSpawn:waveSize(1),clearing:false,
-    hits:0,miss:0,
+    hits:0,miss:0,heat:0,pace:1,lvlMiss:0,
     frozen:false,target:null,spawnT:.6,pause:1.2,streak:0,banner:null});
   setLevel(1);banner();
   $('ovTitle').hidden=true;$('ovOver').hidden=true;$('bZ').classList.remove('on');setFreezeLabel();
   sfx.start();hud();
 }
 function banner(){S.banner={t:'LEVEL '+S.level,s:SPEC_ERR?S.tier.label:'',life:2.6};} // form list hidden; spec errors still shown
-function fallTime(){return 17/S.cfg.speed;}
+function fallTime(){return 17/(S.cfg.speed*S.pace);}
 const slow=size=>Math.min(2,Math.max(1,size/4)); // fall-time multiplier: sizes up to 4 are normal, longer expressions are slower (max x2)
 function maxOn(){return Math.min(7,3+Math.floor(S.level/3));}
 function spawn(node,xf,yf){
@@ -348,7 +350,7 @@ function spawn(node,xf,yf){
   S.exprs.push(e);return e;
 }
 function levelUp(){
-  sfx.triumph();S.level++;S.toSpawn=waveSize(S.level);S.clearing=false;setLevel(S.level);
+  sfx.triumph();S.level++;S.toSpawn=waveSize(S.level);S.clearing=false;S.pace=1;S.lvlMiss=0;setLevel(S.level);
   for(const e of S.exprs)burst(e,'#7a83b8',8,.6);
   S.exprs=[];S.target=null;S.pause=2.6;S.spawnT=.4;
   banner();hud();
@@ -389,9 +391,13 @@ function validTarget(){if(!S.exprs.includes(S.target))S.target=sorted()[0]||null
 function cycle(d){const L=[...S.exprs].sort((a,b)=>a.xf-b.xf);if(!L.length)return;
   const i=L.indexOf(validTarget());S.target=L[(i+d+L.length)%L.length];}
 
+const COOL_TIME=1; // seconds for the blaster to cool after a shot (max one shot per second)
+const MISS_LIMIT=3, MISS_EXTRA=2, PACE_STEP=1.12, PACE_MAX=1.8; // misses per level beyond MISS_LIMIT each add MISS_EXTRA expressions and speed the level by PACE_STEP (capped); reset each level
 const SPLIT_PENALTY=1; // a split costs this multiple of the points its expression would have scored (base 10*size*level, no streak bonus)
 function answer(val){
   if(S.state!=='play')return;const e=validTarget();if(!e)return;
+  if(S.heat>0){sfx.jam();S.jam=.25;return;} // blaster still cooling: no more than one shot per COOL_TIME
+  S.heat=1;
   const correct=ev(e.node)===val;
   S.beams.push({x:boxX(e),y:boxY(e)+e.h/2,c:val?'#43f3ff':'#ff47d6',life:.18});sfx.fire();
   if(correct){
@@ -411,6 +417,10 @@ function answer(val){
     a.mate=b.id;b.mate=a.id;a.flash=b.flash=.4;
     S.target=a;burst(e,'#ff47d6',12,.7);sfx.bad();sfx.split();
     S.floats.push({x:boxX(e),y:boxY(e),t:'SPLIT -'+cost,c:'#ff47d6',life:1});
+    if(++S.lvlMiss>MISS_LIMIT){ // too many misses this level: it gets longer and faster
+      S.toSpawn+=MISS_EXTRA;S.pace=Math.min(PACE_MAX,S.pace*PACE_STEP);
+      S.floats.push({x:W/2,y:groundY()*.5,t:'TOO MANY MISSES · LONGER + FASTER',c:'#ff8f2e',life:1.8});
+    }
   }
   hud();
 }
@@ -454,10 +464,11 @@ function update(dt){
   if(S.banner&&(S.banner.life-=dt)<=0)S.banner=null;
   S.shake=Math.max(0,S.shake-dt);S.flash=Math.max(0,S.flash-dt);
   for(const e of S.exprs)if(e.flash)e.flash=Math.max(0,e.flash-dt);
+  S.heat=Math.max(0,S.heat-dt/COOL_TIME);S.jam=Math.max(0,(S.jam||0)-dt);
   if(S.state!=='play'||S.frozen)return;
   if(S.pause>0){S.pause-=dt;return;}
   S.spawnT-=dt;
-  const iv=4.2/S.cfg.speed;
+  const iv=4.2/(S.cfg.speed*S.pace);
   if(S.toSpawn>0&&((S.spawnT<=0&&S.exprs.length<maxOn())||!S.exprs.length&&S.spawnT>.5)){const ne=spawn();S.toSpawn--;S.spawnT=iv*slow(ne.size);}
   if(!S.toSpawn&&!S.exprs.length&&!S.clearing){S.clearing=true;setTimeout(()=>{if(S.state==='play'&&!S.exprs.length&&!S.toSpawn){if(S.level>=LAST_N)gameOver(true);else levelUp();}else S.clearing=false;},600);}
   // split partners push apart slowly until they are SPLIT_RADIUS apart (fractions of field width)
@@ -506,6 +517,11 @@ function draw(now){
   ctx.save();ctx.translate(cx,cy);ctx.strokeStyle=S.lives>=1?'#ffe445':'#ff4545';ctx.shadowColor='#ffe445';ctx.shadowBlur=10;ctx.lineWidth=2;
   ctx.beginPath();ctx.arc(0,4,16,Math.PI,0);ctx.closePath();ctx.stroke();
   ctx.rotate(ang);ctx.strokeRect(6,-4,22,8);ctx.restore();ctx.shadowBlur=0;
+  if(S.state==='play'){ // heat gauge: red while cooling, green when ready
+    const gw=60,gx=cx-gw/2,gyy=H-8,hot=S.heat>0;
+    ctx.fillStyle='rgba(122,131,184,.25)';ctx.fillRect(gx,gyy,gw,4);
+    ctx.fillStyle=hot?(S.jam>0?'#ffffff':'#ff4545'):'#6dff8a';ctx.fillRect(gx,gyy,hot?gw*S.heat:gw,4);
+    if(S.jam>0)txt('COOLING',cx,gyy-46,10,'#ff4545',disp,8);}
   if(tg){ctx.setLineDash([3,7]);ctx.strokeStyle='rgba(255,228,69,.25)';ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(boxX(tg),boxY(tg)+tg.h);ctx.stroke();ctx.setLineDash([]);}
   // expressions
   ctx.textAlign='center';ctx.textBaseline='middle';
