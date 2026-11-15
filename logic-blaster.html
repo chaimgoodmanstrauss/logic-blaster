@@ -391,7 +391,7 @@ function validTarget(){if(!S.exprs.includes(S.target))S.target=sorted()[0]||null
 function cycle(d){const L=[...S.exprs].sort((a,b)=>a.xf-b.xf);if(!L.length)return;
   const i=L.indexOf(validTarget());S.target=L[(i+d+L.length)%L.length];}
 
-const COOL_TIME=1; // seconds for the blaster to cool after a shot (max one shot per second)
+const COOL_TIME=0.8; // seconds for the blaster to cool after a shot (max one shot per 0.8 s)
 const MISS_LIMIT=3, MISS_EXTRA=2, PACE_STEP=1.12, PACE_MAX=1.8; // misses per level beyond MISS_LIMIT each add MISS_EXTRA expressions and speed the level by PACE_STEP (capped); reset each level
 const SPLIT_PENALTY=1; // a split costs this multiple of the points its expression would have scored (base 10*size*level, no streak bonus)
 function answer(val){
