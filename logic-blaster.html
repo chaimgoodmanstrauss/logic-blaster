@@ -19,6 +19,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidde
 #app{height:100%;max-width:1040px;margin:0 auto;padding-inline:16px;padding-block:8px;box-sizing:border-box;display:flex;flex-direction:column;gap:8px}
 #hud{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-family:var(--disp);font-size:11px;letter-spacing:.06em}
 #hud .k{color:var(--dim);margin-right:6px}
+#hLeft{color:var(--grn);letter-spacing:.15em;font-size:9px;word-break:break-all}
 #hud .score{color:var(--yel)} #hud .lvl{color:var(--cyan)} #hud .lives{color:var(--org);letter-spacing:.2em}
 #stage{position:relative;flex:1;min-height:0;background:var(--crt);border:2px solid var(--line);overflow:hidden}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:manipulation}
@@ -75,6 +76,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--yel);outline-o
     <div><span class="k">LEVEL</span><span class="lvl" id="hLvl">1</span></div>
     <div><span class="k">BASES</span><span class="lives" id="hLives">▲▲▲</span></div>
     <div><span class="k">HI</span><span id="hHi">0</span></div>
+    <div id="hLeftW" hidden><span class="k">LEFT</span><span id="hLeft" aria-live="off"></span></div>
   </div>
   <div id="stage">
     <canvas id="cv"></canvas>
@@ -329,7 +331,7 @@ function readCfg(){S.cfg={leaves:+$('oLeaves').value,speed:+$('oSpeed').value,
 function startGame(){
   audioInit();readCfg();
   Object.assign(S,{state:'play',exprs:[],parts:[],floats:[],beams:[],score:0,level:1,lives:3,toSpawn:waveSize(1),clearing:false,
-    hits:0,miss:0,heat:0,pace:1,lvlMiss:0,
+    hits:0,miss:0,heat:0,pace:1,lvlMiss:0,lvlExtra:0,
     frozen:false,target:null,spawnT:.6,pause:1.2,streak:0,banner:null});
   setLevel(1);banner();
   $('ovTitle').hidden=true;$('ovOver').hidden=true;$('bZ').classList.remove('on');setFreezeLabel();
@@ -350,7 +352,7 @@ function spawn(node,xf,yf){
   S.exprs.push(e);return e;
 }
 function levelUp(){
-  sfx.triumph();S.level++;S.toSpawn=waveSize(S.level);S.clearing=false;S.pace=1;S.lvlMiss=0;setLevel(S.level);
+  sfx.triumph();S.level++;S.toSpawn=waveSize(S.level);S.clearing=false;S.pace=1;S.lvlMiss=0;S.lvlExtra=0;setLevel(S.level);
   for(const e of S.exprs)burst(e,'#7a83b8',8,.6);
   S.exprs=[];S.target=null;S.pause=2.6;S.spawnT=.4;
   banner();hud();
@@ -382,6 +384,10 @@ function recordScore(){
   $('bRecord').disabled=true;$('bRecord').textContent='SAVED';
   renderBoard(b.indexOf(entry));
 }
+let dotsN=-1;
+function dots(){ // countdown: one dot per expression still to clear this level (waiting + on screen)
+  const n=S.state==='play'?S.toSpawn+S.exprs.length:-1;if(n===dotsN)return;dotsN=n;
+  $('hLeftW').hidden=n<0;$('hLeft').textContent='●'.repeat(Math.max(0,n));}
 function hud(){
   $('hScore').textContent=S.score;$('hLvl').textContent=S.level;
   $('hLives').textContent='▲'.repeat(Math.max(0,S.lives))||'—';$('hHi').textContent=Math.max(hi,S.score);
@@ -392,7 +398,7 @@ function cycle(d){const L=[...S.exprs].sort((a,b)=>a.xf-b.xf);if(!L.length)retur
   const i=L.indexOf(validTarget());S.target=L[(i+d+L.length)%L.length];}
 
 const COOL_TIME=0.8; // seconds for the blaster to cool after a shot (max one shot per 0.8 s)
-const MISS_LIMIT=3, MISS_EXTRA=2, PACE_STEP=1.12, PACE_MAX=1.8; // misses per level beyond MISS_LIMIT each add MISS_EXTRA expressions and speed the level by PACE_STEP (capped); reset each level
+const MISS_LIMIT=3, MISS_EXTRA=2, MISS_EXTRA_MAX=6, PACE_STEP=1.12, PACE_MAX=1.8; // misses per level beyond MISS_LIMIT each add MISS_EXTRA expressions (at most MISS_EXTRA_MAX per level) and speed the level by PACE_STEP (capped); reset each level
 const SPLIT_PENALTY=1; // a split costs this multiple of the points its expression would have scored (base 10*size*level, no streak bonus)
 function answer(val){
   if(S.state!=='play')return;const e=validTarget();if(!e)return;
@@ -418,8 +424,9 @@ function answer(val){
     S.target=a;burst(e,'#ff47d6',12,.7);sfx.bad();sfx.split();
     S.floats.push({x:boxX(e),y:boxY(e),t:'SPLIT -'+cost,c:'#ff47d6',life:1});
     if(++S.lvlMiss>MISS_LIMIT){ // too many misses this level: it gets longer and faster
-      S.toSpawn+=MISS_EXTRA;S.pace=Math.min(PACE_MAX,S.pace*PACE_STEP);
-      S.floats.push({x:W/2,y:groundY()*.5,t:'TOO MANY MISSES · LONGER + FASTER',c:'#ff8f2e',life:1.8});
+      const add=Math.min(MISS_EXTRA,MISS_EXTRA_MAX-S.lvlExtra);S.toSpawn+=add;S.lvlExtra+=add;
+      const p0=S.pace;S.pace=Math.min(PACE_MAX,S.pace*PACE_STEP);
+      if(add||S.pace>p0)S.floats.push({x:W/2,y:groundY()*.5,t:'TOO MANY MISSES · '+(add?'LONGER + FASTER':'FASTER'),c:'#ff8f2e',life:1.8});
     }
   }
   hud();
@@ -465,6 +472,7 @@ function update(dt){
   S.shake=Math.max(0,S.shake-dt);S.flash=Math.max(0,S.flash-dt);
   for(const e of S.exprs)if(e.flash)e.flash=Math.max(0,e.flash-dt);
   S.heat=Math.max(0,S.heat-dt/COOL_TIME);S.jam=Math.max(0,(S.jam||0)-dt);
+  dots();
   if(S.state!=='play'||S.frozen)return;
   if(S.pause>0){S.pause-=dt;return;}
   S.spawnT-=dt;
